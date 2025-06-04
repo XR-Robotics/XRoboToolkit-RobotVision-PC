@@ -138,8 +138,38 @@ Build dependencies:
 
 ### 3.1 Environment Configuration
 Before building, ensure the following environment is correctly configured:
-- Visual Studio 2019 Community (located at `D:\MyProgram\Microsoft Visual Studio\2019\Community`)
+- [Visual Studio 2019 Community](https://ia804501.us.archive.org/6/items/vs_Community/vs_Community.exe) (located at `D:\MyProgram\Microsoft Visual Studio\2019\Community`)
 - Qt 6.6.2 (located at `D:\MyProgram\Qt6\6.6.2\msvc2019_64`)
+
+    <details>
+    <summary>Installation Guidance</summary>
+
+    - Install [Qt Online Installer](https://doc.qt.io/qt-6/qt-online-installation.html)
+    - Select Custom Installation
+    - Select 
+        - Qt 6.6.x
+            - MSVC 2019 64-bit
+            - Qt Quick 3D
+            - Qt Shader Tools
+            - Additional Libraries
+                - Qt 3D
+                - Qt Charts
+                - Qt Graphs (TP)
+                - Qt Multimedia
+                - Qt Positioning
+                - Qt Quick 3D Physics
+                - Qt Quick Effect Maker
+                - Qt WebChannel
+                - Qt WebEngine
+                - Qt WebSockets
+                - Qt WebView
+            - Qt Quick TimeLine
+        - Build Tools
+            - CMake
+            - Ninja
+    - Install
+    </details>
+
 - FFmpeg 7.1 (located at project root directory `../../ffmpeg-7.1-full_build-shared`)
 - ASIO 1.30.2 (located at project root directory `../../asio-1.30.2`)
 
