@@ -34,14 +34,14 @@ extern "C" {
 // Add file path constant
 
 // main function
-int RunCameraCaptureTest() {
+int RunCameraCaptureTest(char* captureDevice) {
     // Global initialization (only call once)
     avdevice_register_all();
     // Set FFmpeg log level to debug mode
     //av_log_set_level(AV_LOG_DEBUG);
 
     // Parameter configuration
-    const char* captureDevice = "video=HP HD Camera";
+    //const char* captureDevice = "video=HP HD Camera";
     int resolution_width = 1280;
     int resolution_height = 720;
 
@@ -168,7 +168,7 @@ int runH264TCPTransferTest(int argc, char* argv[]) {
         videoSource->start("192.168.31.14", 12345, [&output_file](const char* data, int size, int width, int height) {
             // Write data to file stream
             output_file.write(data, size);
-        });
+            });
 
         // Start a thread to listen for user input
         while (true) {
@@ -182,7 +182,8 @@ int runH264TCPTransferTest(int argc, char* argv[]) {
         }
 
         printf("All frames have been written to decoded_frames.yuv\n");
-    } else if (mode == "c") {
+    }
+    else if (mode == "c") {
         // Define client run function
         auto run = [](CameraDataSender& sender) {
             // Global initialization (only call once)
@@ -201,7 +202,7 @@ int runH264TCPTransferTest(int argc, char* argv[]) {
             const char* codec = "mjpeg";
             const int frameRate = 60; // Use integer constant
             std::string framerate_str = std::to_string(frameRate);
-            int frame_count = frameRate*5;
+            int frame_count = frameRate * 5;
 
             // Define encoder callback function
             auto encoder_callback = [&sender](const uint8_t* data, size_t size) {
@@ -214,9 +215,9 @@ int runH264TCPTransferTest(int argc, char* argv[]) {
 
             // Define frame processing callback function
             auto frame_callback = [&h264_encoder](auto y, auto u, auto v,
-                                      auto y_sz, auto u_sz, auto v_sz,
-                                      int w, int h, int idx) {
-                h264_encoder.encodeFrame(y, u, v, y_sz, u_sz, v_sz);
+                auto y_sz, auto u_sz, auto v_sz,
+                int w, int h, int idx) {
+                    h264_encoder.encodeFrame(y, u, v, y_sz, u_sz, v_sz);
             };
 
             // Create and execute camera capture object
@@ -226,7 +227,7 @@ int runH264TCPTransferTest(int argc, char* argv[]) {
                 framerate_str.c_str(),
                 codec,
                 frame_count
-                );
+            );
 
             // Run capture and pass callback function
             int ret = capture.run(frame_callback);
@@ -242,7 +243,8 @@ int runH264TCPTransferTest(int argc, char* argv[]) {
         sender.startConnect(run); // Pass lambda function as callback
         sender.runIOContext(); // Run io_context to handle async operations
 
-    } else {
+    }
+    else {
         std::cout << "Invalid parameter, please use 's' or 'c'" << std::endl;
         return 1;
     }
@@ -251,82 +253,67 @@ int runH264TCPTransferTest(int argc, char* argv[]) {
 }
 
 int runH264TCPCameraCaptureTest(int argc, char* argv[]) {
-    // Define client run function
-    auto run = [](CameraDataSender& sender) {
-        // Global initialization (only call once)
-        avdevice_register_all();
-        // Set FFmpeg log level to debug mode
-        //av_log_set_level(AV_LOG_DEBUG);
+    if (argc < 3) {
+        std::cout << "Usage: tcp-camera c <server_ip> [camera_name]" << std::endl;
+        return 1;
+    }
 
-        // Parameter configuration
-        const char* captureDevice = "video=Orbbec Gemini 2 RGB Camera";
+    //std::string client_ip = argv[1];
+    std::string server_ip = argv[2];
+    //std::cout << "Server_ip: " << server_ip << std::endl;
+    std::string camera_name = (argc > 3) ? argv[3] : "video=Orbbec Gemini 2 RGB Camera";
+    //std::cout << "camera_name: " << camera_name << std::endl;
+
+    CameraDataSender sender(server_ip, 12345);
+    auto run = [camera_name](CameraDataSender& sender) {
+        avdevice_register_all();
+
         int resolution_width = 1920;
         int resolution_height = 1080;
-
-        // Generate resolution string
         std::string resolution = std::to_string(resolution_width) + "x" + std::to_string(resolution_height);
-
         const char* codec = "mjpeg";
-        const int frameRate = 60; // Use integer constant
+        const int frameRate = 60;
         std::string framerate_str = std::to_string(frameRate);
 
-        // Define encoder callback function
         auto encoder_callback = [&sender](const uint8_t* data, size_t size) {
-            OutputDebugStringA((std::string("encode done send size: ") + std::to_string(size)).c_str());
             sender.sendData(reinterpret_cast<const char*>(data), static_cast<uint32_t>(size));
         };
 
-        // Create encoder instance
         H264Encoder h264_encoder(resolution_width, resolution_height, encoder_callback, frameRate);
 
-        // Define frame processing callback function
-        auto frame_callback = [&h264_encoder](auto y, auto u, auto v,
-                                  auto y_sz, auto u_sz, auto v_sz,
-                                  int w, int h, int idx) {
+        auto frame_callback = [&h264_encoder](auto y, auto u, auto v, auto y_sz, auto u_sz, auto v_sz, int w, int h, int idx) {
             h264_encoder.encodeFrame(y, u, v, y_sz, u_sz, v_sz);
         };
 
-        // Create camera capture object (set to continuous capture mode)
         CameraCapture capture(
-            captureDevice,
+            camera_name.c_str(),
             resolution.c_str(),
             framerate_str.c_str(),
             codec,
-            0  // Set to 0 for continuous capture
+            0 // continuous
         );
 
-
-        // Start keyboard listening thread
         std::thread input_thread([&capture]() {
             std::cout << "Press Q to stop capturing..." << std::endl;
             while (true) {
                 if (_kbhit()) {
                     char ch = _getch();
                     if (ch == 'q' || ch == 'Q') {
-                        capture.stopCapture();  // Call existing stop method
+                        capture.stopCapture();
                         break;
                     }
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
-        });
-        // Run capture and pass callback function
+            });
+
         int ret = capture.run(frame_callback);
-
-        printf("Capture completed with exit code: %d\n", ret);
-
-        // Wait for input thread to end
         input_thread.join();
-
-        // Disconnect
         sender.disconnect();
     };
 
-    // Create client instance and start connection
-    CameraDataSender sender("192.168.31.13", 12345,"192.168.31.14");
-    sender.startConnect(run); // Pass lambda function as callback
-    sender.runIOContext(); // Run io_context to handle async operations
-
+    sender.startConnect(run);
+    sender.runIOContext();
     return 0;
 }
 
@@ -485,7 +472,11 @@ int main(int argc, char* argv[]) {
     std::string option = argv[1];
 
     if (option == "--camera-test") {
-        return RunCameraCaptureTest();
+        if (argc != 3) {
+            std::cout << "Error: --camera-test camera-name" << std::endl;
+            return 1;
+        }
+        return RunCameraCaptureTest(argv[2]);
     }
     else if (option == "--simple-capture") {
         return RunSimpleCameraCaptureTest();
@@ -498,8 +489,8 @@ int main(int argc, char* argv[]) {
         return runH264TCPTransferTest(argc - 1, argv + 1);
     }
     else if (option == "--tcp-camera") {
-        if (argc != 3) {
-            std::cout << "Error: --tcp-camera requires [s|c] parameter" << std::endl;
+        if (argc != 5) {
+            std::cout << "Error: --tcp-camera c <server_ip> [camera_name]" << std::endl;
             return 1;
         }
         return runH264TCPCameraCaptureTest(argc - 1, argv + 1);
