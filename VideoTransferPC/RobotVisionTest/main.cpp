@@ -106,8 +106,8 @@ int RunSimpleCameraCaptureTest() {
     // Generate resolution string using width and height
     std::string resolution = std::to_string(resolution_width) + "x" + std::to_string(resolution_height);
 
-    const char* codec = "mjpeg";
-    const int frameRate = 60;
+    const char* codec = "libx264"; // mjpeg
+    const int frameRate = 30; // 60
     std::string framerate_str = std::to_string(frameRate);
     int frame_count = frameRate;
 
@@ -258,11 +258,8 @@ int runH264TCPCameraCaptureTest(int argc, char* argv[]) {
         return 1;
     }
 
-    //std::string client_ip = argv[1];
     std::string server_ip = argv[2];
-    //std::cout << "Server_ip: " << server_ip << std::endl;
     std::string camera_name = (argc > 3) ? argv[3] : "video=Orbbec Gemini 2 RGB Camera";
-    //std::cout << "camera_name: " << camera_name << std::endl;
 
     CameraDataSender sender(server_ip, 12345);
     auto run = [camera_name](CameraDataSender& sender) {
@@ -271,12 +268,34 @@ int runH264TCPCameraCaptureTest(int argc, char* argv[]) {
         int resolution_width = 1920;
         int resolution_height = 1080;
         std::string resolution = std::to_string(resolution_width) + "x" + std::to_string(resolution_height);
-        const char* codec = "mjpeg";
-        const int frameRate = 60;
+        const AVCodec* avcodec = avcodec_find_decoder(AV_CODEC_ID_H264);
+        const char* codec = avcodec_get_name(avcodec->id);
+        const int frameRate = 30;
         std::string framerate_str = std::to_string(frameRate);
 
         auto encoder_callback = [&sender](const uint8_t* data, size_t size) {
-            sender.sendData(reinterpret_cast<const char*>(data), static_cast<uint32_t>(size));
+            if (size == 0 || data == nullptr) {
+                OutputDebugStringA("Encoder callback received empty data.\n");
+                return;
+            }
+
+            // Implement 4-byte big-endian length header, matching Java's ByteBuffer.putInt(length)
+            // The Java code sends the entire encodedData (NALU) prefixed with its length.
+            // The C++ side should do the same.
+
+            std::vector<uint8_t> packet(4 + size);
+
+            // Write length in big-endian format
+            packet[0] = (size >> 24) & 0xFF;
+            packet[1] = (size >> 16) & 0xFF;
+            packet[2] = (size >> 8) & 0xFF;
+            packet[3] = (size) & 0xFF;
+
+            // Copy NALU data
+            std::copy(data, data + size, packet.begin() + 4);
+
+            // Send the length-prefixed packet
+            sender.sendData(reinterpret_cast<const char*>(packet.data()), static_cast<uint32_t>(packet.size()));
         };
 
         H264Encoder h264_encoder(resolution_width, resolution_height, encoder_callback, frameRate);
