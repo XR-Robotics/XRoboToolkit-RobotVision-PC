@@ -150,6 +150,7 @@ Before building, ensure the following environment is correctly configured:
         - Qt 6.6.x
             - MSVC 2019 64-bit
             - Qt Quick 3D
+			- Qt 5 Compatibility Module
             - Qt Shader Tools
             - Additional Libraries
                 - Qt 3D
