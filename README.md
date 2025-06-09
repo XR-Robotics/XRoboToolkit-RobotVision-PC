@@ -86,9 +86,8 @@ RobotVisionTest project for testing related functional classes.
 
 4. Complete Camera Capture, H.264 Encoding, TCP Transmission Test
    - Function: `runH264TCPCameraCaptureTest(int argc, char* argv[])`
-   - Command line option: `--tcp-camera [s|c]`
+   - Command line option: `--tcp-camera c`
    - Parameter description:
-     - s: Run server side
      - c: Run client side
    - Functionality: Tests complete camera capture, H.264 encoding, TCP transmission process
    - Process flow:
@@ -98,7 +97,7 @@ RobotVisionTest project for testing related functional classes.
    - Usage example:
      ```bash
      # Server side
-     RobotVisionConsole.exe --tcp-camera s
+     appVideoPlayer.exe
      # Client side
      RobotVisionConsole.exe --tcp-camera c
      ```
