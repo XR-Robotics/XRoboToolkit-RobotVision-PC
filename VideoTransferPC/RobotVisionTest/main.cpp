@@ -34,7 +34,7 @@ extern "C" {
 // Add file path constant
 
 // main function
-int RunCameraCaptureTest(char* captureDevice) {
+int RunCameraCaptureTest(char* captureDevice, int resolution_width, int resolution_height, int frameRate) {
     // Global initialization (only call once)
     avdevice_register_all();
     // Set FFmpeg log level to debug mode
@@ -42,14 +42,14 @@ int RunCameraCaptureTest(char* captureDevice) {
 
     // Parameter configuration
     //const char* captureDevice = "video=HP HD Camera";
-    int resolution_width = 1280;
-    int resolution_height = 720;
+    //int resolution_width = 1280; // Parameterized
+    //int resolution_height = 720; // Parameterized
 
     // Generate resolution string using width and height
     std::string resolution = std::to_string(resolution_width) + "x" + std::to_string(resolution_height);
 
     const char* codec = "mjpeg";
-    const int frameRate = 30; // Use integer constant
+    //const int frameRate = 30; // Use integer constant // Parameterized
     std::string framerate_str = std::to_string(frameRate);
     int frame_count = frameRate;
 
@@ -71,10 +71,10 @@ int RunCameraCaptureTest(char* captureDevice) {
 
     // Define frame processing callback function
     auto frame_callback = [&h264_encoder](auto y, auto u, auto v,
-                           auto y_sz, auto u_sz, auto v_sz,
-                           int w, int h, int idx) {
-        printf("Processing frame %d\n", idx);
-        h264_encoder.encodeFrame(y, u, v, y_sz, u_sz, v_sz);
+        auto y_sz, auto u_sz, auto v_sz,
+        int w, int h, int idx) {
+            printf("Processing frame %d\n", idx);
+            h264_encoder.encodeFrame(y, u, v, y_sz, u_sz, v_sz);
     };
 
     // Create and execute camera capture object
@@ -84,7 +84,7 @@ int RunCameraCaptureTest(char* captureDevice) {
         framerate_str.c_str(),
         codec,
         frame_count
-        );
+    );
 
     // Run capture and pass callback function
     int ret = capture.run(frame_callback);
@@ -94,20 +94,20 @@ int RunCameraCaptureTest(char* captureDevice) {
     return ret;
 }
 
-int RunSimpleCameraCaptureTest() {
+int RunSimpleCameraCaptureTest(char* captureDevice, int resolution_width, int resolution_height, int frameRate) {
     // Global initialization (only call once)
     avdevice_register_all();
 
     // Parameter configuration
-    const char* captureDevice = "video=Orbbec Gemini 2 RGB Camera";
-    int resolution_width = 1280;
-    int resolution_height = 720;
+    //const char* captureDevice = "video=Orbbec Gemini 2 RGB Camera"; // Parameterized
+    //int resolution_width = 1280; // Parameterized
+    //int resolution_height = 720; // Parameterized
 
     // Generate resolution string using width and height
     std::string resolution = std::to_string(resolution_width) + "x" + std::to_string(resolution_height);
 
     const char* codec = "libx264"; // mjpeg
-    const int frameRate = 30; // 60
+    //const int frameRate = 30; // 60 // Parameterized
     std::string framerate_str = std::to_string(frameRate);
     int frame_count = frameRate;
 
@@ -120,13 +120,13 @@ int RunSimpleCameraCaptureTest() {
 
     // Define frame processing callback function
     auto frame_callback = [output_file](auto y, auto u, auto v,
-                           auto y_sz, auto u_sz, auto v_sz,
-                           int w, int h, int idx) {
-        // Write current frame
-        fwrite(y, 1, y_sz, output_file);
-        fwrite(u, 1, u_sz, output_file);
-        fwrite(v, 1, v_sz, output_file);
-        printf("Wrote frame %d to captured_frames.yuv\n", idx + 1);
+        auto y_sz, auto u_sz, auto v_sz,
+        int w, int h, int idx) {
+            // Write current frame
+            fwrite(y, 1, y_sz, output_file);
+            fwrite(u, 1, u_sz, output_file);
+            fwrite(v, 1, v_sz, output_file);
+            printf("Wrote frame %d to captured_frames.yuv\n", idx + 1);
     };
 
     // Create and execute camera capture object
@@ -151,11 +151,9 @@ int RunSimpleCameraCaptureTest() {
 }
 
 
-int runH264TCPTransferTest(int argc, char* argv[]) {
+int runH264TCPTransferTest(int argc, char* argv[], const std::string & ip, int port, int resolution_width, int resolution_height, int frameRate, const std::string & camera_name) {
     if (argc != 2) {
-        std::cout << "Usage: " << argv[0] << " [s|c]" << std::endl;
-        std::cout << "s - Run server" << std::endl;
-        std::cout << "c - Run client" << std::endl;
+        // This usage message will be handled by the main function's printUsage
         return 1;
     }
 
@@ -165,7 +163,7 @@ int runH264TCPTransferTest(int argc, char* argv[]) {
         std::ofstream output_file("decoded_frames.yuv", std::ios::binary);
 
         auto videoSource = std::make_unique<NetworkVideoSource>();
-        videoSource->start("192.168.31.14", 12345, [&output_file](const char* data, int size, int width, int height) {
+        videoSource->start(ip.c_str(), port, [&output_file](const char* data, int size, int width, int height) {
             // Write data to file stream
             output_file.write(data, size);
             });
@@ -185,22 +183,22 @@ int runH264TCPTransferTest(int argc, char* argv[]) {
     }
     else if (mode == "c") {
         // Define client run function
-        auto run = [](CameraDataSender& sender) {
+        auto run = [&](CameraDataSender& sender) {
             // Global initialization (only call once)
             avdevice_register_all();
             // Set FFmpeg log level to debug mode
             //av_log_set_level(AV_LOG_DEBUG);
 
             // Parameter configuration
-            const char* captureDevice = "video=Orbbec Gemini 2 RGB Camera";
-            int resolution_width = 1280;
-            int resolution_height = 720;
+            //const char* captureDevice = "video=Orbbec Gemini 2 RGB Camera"; // Parameterized
+            //int resolution_width = 1280; // Parameterized
+            //int resolution_height = 720; // Parameterized
 
             // Use resolution width and height to generate resolution string
             std::string resolution = std::to_string(resolution_width) + "x" + std::to_string(resolution_height);
 
             const char* codec = "mjpeg";
-            const int frameRate = 60; // Use integer constant
+            //const int frameRate = 60; // Use integer constant // Parameterized
             std::string framerate_str = std::to_string(frameRate);
             int frame_count = frameRate * 5;
 
@@ -222,7 +220,7 @@ int runH264TCPTransferTest(int argc, char* argv[]) {
 
             // Create and execute camera capture object
             CameraCapture capture(
-                captureDevice,
+                camera_name.c_str(),
                 resolution.c_str(),
                 framerate_str.c_str(),
                 codec,
@@ -239,7 +237,7 @@ int runH264TCPTransferTest(int argc, char* argv[]) {
         };
 
         // Create client instance and start connection
-        CameraDataSender sender("192.168.31.14", 12345);
+        CameraDataSender sender(ip.c_str(), port);
         sender.startConnect(run); // Pass lambda function as callback
         sender.runIOContext(); // Run io_context to handle async operations
 
@@ -252,25 +250,21 @@ int runH264TCPTransferTest(int argc, char* argv[]) {
     return 0;
 }
 
-int runH264TCPCameraCaptureTest(int argc, char* argv[]) {
-    if (argc < 3) {
-        std::cout << "Usage: tcp-camera c <server_ip> [camera_name]" << std::endl;
-        return 1;
-    }
+int runH264TCPCameraCaptureTest(int argc, char* argv[], const std::string & server_ip, int port, int resolution_width, int resolution_height, int frameRate, const std::string & camera_name) {
 
-    std::string server_ip = argv[2];
-    std::string camera_name = (argc > 3) ? argv[3] : "video=Orbbec Gemini 2 RGB Camera";
+    //std::string server_ip = argv[2]; // Parameterized
+    //std::string camera_name = (argc > 3) ? argv[3] : "video=Orbbec Gemini 2 RGB Camera"; // Parameterized
 
-    CameraDataSender sender(server_ip, 12345);
-    auto run = [camera_name](CameraDataSender& sender) {
+    CameraDataSender sender(server_ip.c_str(), port);
+    auto run = [&](CameraDataSender& sender) {
         avdevice_register_all();
 
-        int resolution_width = 1920;
-        int resolution_height = 1080;
+        //int resolution_width = 1920; // Parameterized
+        //int resolution_height = 1080; // Parameterized
         std::string resolution = std::to_string(resolution_width) + "x" + std::to_string(resolution_height);
         const AVCodec* avcodec = avcodec_find_decoder(AV_CODEC_ID_H264);
         const char* codec = avcodec_get_name(avcodec->id);
-        const int frameRate = 30;
+        //const int frameRate = 30; // Parameterized
         std::string framerate_str = std::to_string(frameRate);
 
         auto encoder_callback = [&sender](const uint8_t* data, size_t size) {
@@ -369,7 +363,7 @@ int analyzeDelay(int argc, char* argv[]) {
     // Read log file and save timestamps based on different stage keywords
     while (std::getline(infile, line)) {
         lineCount++;
-        if(line.empty()) continue;
+        if (line.empty()) continue;
         std::istringstream iss(line);
         int seq;
         double timeStamp;
@@ -420,7 +414,7 @@ int analyzeDelay(int argc, char* argv[]) {
     std::cout << "Stage 5 (presentFrame done) count: " << stage5.size() << std::endl;
 
     // Use smallest count of log lines as complete cycle count
-    size_t cycles = std::min({stage0.size(), stage1.size(), stage2.size(), stage3.size(), stage4.size(), stage5.size()});
+    size_t cycles = std::min({ stage0.size(), stage1.size(), stage2.size(), stage3.size(), stage4.size(), stage5.size() });
     std::cout << "Total complete cycles: " << cycles << std::endl;
 
     // Open CSV file for output.
@@ -442,7 +436,7 @@ int analyzeDelay(int argc, char* argv[]) {
         double d4 = (stage4[i] - stage3[i]) * 1000;
         double d5 = (stage5[i] - stage4[i]) * 1000;
         outfile << std::fixed << std::setprecision(6)
-                << d1 << "," << d2 << "," << d3 << "," << d4 << "," << d5 << "\n";
+            << d1 << "," << d2 << "," << d3 << "," << d4 << "," << d5 << "\n";
 
     }
 
@@ -469,17 +463,34 @@ int analyzeDelay(int argc, char* argv[]) {
 }
 
 void printUsage(const char* programName) {
-    std::cout << "Usage: " << programName << " [option]" << std::endl;
+    std::cout << "Usage: " << programName << " [option] [parameters]" << std::endl;
     std::cout << "Options:" << std::endl;
     std::cout << "  --camera-test        Run camera capture, H.264 encoding and decoding test" << std::endl;
+    std::cout << "                       Parameters: --camera <camera_name> --width <width> --height <height> --fps <fps>" << std::endl;
     std::cout << "  --simple-capture     Run simple camera capture test (save YUV file)" << std::endl;
+    std::cout << "                       Parameters: --camera <camera_name> --width <width> --height <height> --fps <fps>" << std::endl;
     std::cout << "  --tcp-transfer [s|c] Run H.264 TCP transfer test" << std::endl;
     std::cout << "                       s: Server side" << std::endl;
     std::cout << "                       c: Client side" << std::endl;
-    std::cout << "  --tcp-camera [s|c]   Run complete camera capture, H.264 encoding, TCP transfer test" << std::endl;
+    std::cout << "                       Parameters (for client): --ip <ip_address> --port <port> --camera <camera_name> --width <width> --height <height> --fps <fps>" << std::endl;
+    std::cout << "                       Parameters (for server): --ip <ip_address> --port <port>" << std::endl;
+    /*std::cout << "  --tcp-camera [s|c]   Run complete camera capture, H.264 encoding, TCP transfer test" << std::endl;
     std::cout << "                       s: Server side" << std::endl;
     std::cout << "                       c: Client side" << std::endl;
+    std::cout << "                       Parameters (for client): --ip <ip_address> --port <port> --camera <camera_name> --width <width> --height <height> --fps <fps>" << std::endl;
+    std::cout << "                       Parameters (for server): --ip <ip_address> --port <port>" << std::endl;*/
+    std::cout << "  --tcp-camera c       Run complete camera capture, H.264 encoding, TCP transfer test" << std::endl;
+    //std::cout << "                       s: Server side" << std::endl;
+    std::cout << "                       c: Client side" << std::endl;
+    std::cout << "                       Parameters (for client): --ip <ip_address> --port <port> --camera <camera_name> --width <width> --height <height> --fps <fps>" << std::endl;
+    std::cout << "                       Note: The server is located in the VideoPlayer." << std::endl;
     std::cout << "  --analyze-delay      Analyze delays in video processing stages" << std::endl;
+    std::cout << "Default camera: video=Integrated Webcam" << std::endl;
+    std::cout << "Default IP: 127.0.0.1" << std::endl;
+    std::cout << "Default Port: 12345" << std::endl;
+    std::cout << "Default Width: 1280" << std::endl;
+    std::cout << "Default Height: 720" << std::endl;
+    std::cout << "Default FPS: 30" << std::endl;
 }
 
 int main(int argc, char* argv[]) {
@@ -490,29 +501,61 @@ int main(int argc, char* argv[]) {
 
     std::string option = argv[1];
 
-    if (option == "--camera-test") {
-        if (argc != 3) {
-            std::cout << "Error: --camera-test camera-name" << std::endl;
-            return 1;
+    // Default values for parameters
+    std::string camera_name = "video=Integrated Webcam";
+    int resolution_width = 1280;
+    int resolution_height = 720;
+    int frameRate = 30;
+    std::string ip = "127.0.0.1";
+    int port = 12345;
+
+    // Parse command-line arguments for common parameters
+    for (int i = 2; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--camera" && i + 1 < argc) {
+            camera_name = argv[++i];
         }
-        return RunCameraCaptureTest(argv[2]);
+        else if (arg == "--width" && i + 1 < argc) {
+            resolution_width = std::stoi(argv[++i]);
+        }
+        else if (arg == "--height" && i + 1 < argc) {
+            resolution_height = std::stoi(argv[++i]);
+        }
+        else if (arg == "--fps" && i + 1 < argc) {
+            frameRate = std::stoi(argv[++i]);
+        }
+        else if (arg == "--ip" && i + 1 < argc) {
+            ip = argv[++i];
+        }
+        else if (arg == "--port" && i + 1 < argc) {
+            port = std::stoi(argv[++i]);
+        }
+    }
+
+    if (option == "--camera-test") {
+        return RunCameraCaptureTest(const_cast<char*>(camera_name.c_str()), resolution_width, resolution_height, frameRate);
     }
     else if (option == "--simple-capture") {
-        return RunSimpleCameraCaptureTest();
+        return RunSimpleCameraCaptureTest(const_cast<char*>(camera_name.c_str()), resolution_width, resolution_height, frameRate);
     }
     else if (option == "--tcp-transfer") {
-        if (argc != 3) {
+        if (argc < 3) {
             std::cout << "Error: --tcp-transfer requires [s|c] parameter" << std::endl;
+            printUsage(argv[0]);
             return 1;
         }
-        return runH264TCPTransferTest(argc - 1, argv + 1);
+        // Pass the mode argument (argv[2]) to runH264TCPTransferTest
+        return runH264TCPTransferTest(2, argv + 1, ip, port, resolution_width, resolution_height, frameRate, camera_name);
     }
     else if (option == "--tcp-camera") {
-        if (argc != 5) {
-            std::cout << "Error: --tcp-camera c <server_ip> [camera_name]" << std::endl;
+        if (argc < 3) {
+            //std::cout << "Error: --tcp-camera requires [s|c] parameter" << std::endl;
+            std::cout << "Error: --tcp-camera requires c parameter" << std::endl;
+            printUsage(argv[0]);
             return 1;
         }
-        return runH264TCPCameraCaptureTest(argc - 1, argv + 1);
+        // Pass the mode argument (argv[2]) to runH264TCPCameraCaptureTest
+        return runH264TCPCameraCaptureTest(2, argv + 1, ip, port, resolution_width, resolution_height, frameRate, camera_name);
     }
     else if (option == "--analyze-delay") {
         return analyzeDelay(argc - 1, argv + 1);
@@ -523,4 +566,3 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 }
-

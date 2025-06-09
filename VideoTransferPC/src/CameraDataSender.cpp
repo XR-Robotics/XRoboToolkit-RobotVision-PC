@@ -13,7 +13,8 @@ void CameraDataSender::startConnect(std::function<void(CameraDataSender&)> runCa
         std::cout << "Socket is not open, opening socket with TCP v4" << std::endl;
         try {
             m_socket.open(asio::ip::tcp::v4());
-        } catch (const std::exception& e) {
+        }
+        catch (const std::exception& e) {
             std::cerr << "Failed to open socket: " << e.what() << std::endl;
             throw;
         }
@@ -25,11 +26,13 @@ void CameraDataSender::startConnect(std::function<void(CameraDataSender&)> runCa
             auto local_endpoint = asio::ip::tcp::endpoint(asio::ip::address::from_string(m_bindIP), 0);
             m_socket.bind(local_endpoint);
             std::cout << "Socket bound to " << local_endpoint.address().to_string() << std::endl;
-        } catch (const std::exception &e) {
+        }
+        catch (const std::exception& e) {
             std::cerr << "Socket bind error: " << e.what() << std::endl;
             throw;
         }
-    } else {
+    }
+    else {
         std::cout << "Using default network interface." << std::endl;
     }
 
@@ -37,11 +40,12 @@ void CameraDataSender::startConnect(std::function<void(CameraDataSender&)> runCa
     m_socket.async_connect(endpoint, [runCallback, this](std::error_code ec) {
         if (ec) {
             std::cout << "Connection failed: " << ec.message() << std::endl;
-        } else {
+        }
+        else {
             std::cout << "Connection succeeded" << std::endl;
         }
         runCallback(*this);
-    });
+        });
 }
 
 void CameraDataSender::sendData(const char* data, uint32_t dataLength) {
@@ -51,19 +55,18 @@ void CameraDataSender::sendData(const char* data, uint32_t dataLength) {
         return; // Connection not successful, return
     }
 
-    // Send data length first
     asio::error_code error;
-    size_t header_bytes_sent = m_socket.send(asio::buffer(&dataLength, sizeof(dataLength)), 0, error);
+    size_t total_bytes_sent = 0;
 
-    if (error) {
-        std::cerr << "Send length error: " << error.message() << std::endl;
-        return;
-    }
-
-    // Then send actual data
-    size_t bytes_sent = m_socket.send(asio::buffer(data, dataLength), 0, error);
-    if (error) {
-        std::cerr << "Send error: " << error.message() << std::endl;
+    // Loop until all data is sent
+    while (total_bytes_sent < dataLength) {
+        size_t bytes_sent = m_socket.send(asio::buffer(data + total_bytes_sent, dataLength - total_bytes_sent), 0, error);
+        if (error) {
+            std::cerr << "Send error: " << error.message() << std::endl;
+            // Depending on the error, you might want to try reconnecting or handle it differently
+            return;
+        }
+        total_bytes_sent += bytes_sent;
     }
 }
 
