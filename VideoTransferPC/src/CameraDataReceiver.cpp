@@ -69,35 +69,65 @@ void CameraDataReceiver::acceptConnections() {
 void CameraDataReceiver::handleClient(std::shared_ptr<asio::ip::tcp::socket> socket) {
     while (socket->is_open() && !m_should_exit) {
         try {
-            // First receive data length (4-byte uint32_t)
-            uint32_t dataLength = 0;
+            // First, receive the 4-byte big-endian length header
+            std::array<uint8_t, 4> length_bytes;
             asio::error_code error;
 
-            // Read fixed length header information
-            size_t header_bytes_read = asio::read(*socket, asio::buffer(&dataLength, sizeof(dataLength)), error);
+            size_t header_bytes_read = asio::read(*socket, asio::buffer(length_bytes), error);
 
             if (error) {
-                std::cout << "Error reading length: " << error.message() << std::endl;
+                if (error == asio::error::eof || error == asio::error::connection_reset) {
+                    std::cout << "Client disconnected." << std::endl;
+                }
+                else {
+                    std::cerr << "Error reading length header: " << error.message() << std::endl;
+                }
                 break;
+            }
+
+            if (header_bytes_read != sizeof(length_bytes)) {
+                std::cerr << "Incomplete length header received. Expected " << sizeof(length_bytes) << " bytes, got " << header_bytes_read << std::endl;
+                break;
+            }
+
+            // Reconstruct dataLength from big-endian bytes
+            uint32_t dataLength = (static_cast<uint32_t>(length_bytes[0]) << 24) |
+                (static_cast<uint32_t>(length_bytes[1]) << 16) |
+                (static_cast<uint32_t>(length_bytes[2]) << 8) |
+                static_cast<uint32_t>(length_bytes[3]);
+
+            if (dataLength == 0) {
+                // Handle empty data or keep-alive if applicable
+                std::cout << "Received 0-length packet. Continuing..." << std::endl;
+                continue;
             }
 
             // Create buffer based on received length
             std::vector<char> buffer(dataLength);
 
-            // Read data of specified length
+            // Read the data payload of specified length
             size_t bytes_read = asio::read(*socket, asio::buffer(buffer), error);
 
             if (error) {
-                std::cout << "Error reading data: " << error.message() << std::endl;
+                std::cerr << "Error reading data payload: " << error.message() << std::endl;
                 break;
             }
 
+            if (bytes_read != dataLength) {
+                std::cerr << "Incomplete data payload received. Expected " << dataLength << " bytes, got " << bytes_read << std::endl;
+                // Depending on your protocol, you might need to handle this as a fatal error or try to recover
+                break;
+            }
+
+            // Callback with the received data and its actual size
+            // Note: m_dataCallback expects the actual data, not including the length prefix.
             m_dataCallback(buffer.data(), bytes_read);
         }
         catch (const std::exception& e) {
-            std::cerr << "Error handling client: " << e.what() << std::endl;
+            std::cerr << "Exception in handleClient: " << e.what() << std::endl;
+            break; // Exit the loop on exception
         }
     }
-
+    std::cout << "Client handler stopped." << std::endl;
     // Socket will be automatically closed when shared_ptr is destructed
 }
