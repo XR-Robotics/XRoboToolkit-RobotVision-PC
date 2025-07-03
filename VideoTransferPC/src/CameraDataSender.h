@@ -6,6 +6,12 @@
 #include <iostream>
 #include <functional>
 
+class SendDataException : public std::runtime_error {
+public:
+    explicit SendDataException(const std::string& message)
+        : std::runtime_error(message) {}
+};
+
 class CameraDataSender {
 public:
     CameraDataSender(const std::string& host, int port, const std::string& bindIP = "");

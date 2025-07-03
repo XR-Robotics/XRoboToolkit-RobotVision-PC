@@ -51,8 +51,8 @@ void CameraDataSender::startConnect(std::function<void(CameraDataSender&)> runCa
 void CameraDataSender::sendData(const char* data, uint32_t dataLength) {
     // Check if connection is successful
     if (!m_socket.is_open()) {
-        std::cerr << "Socket is not connected. Cannot send data." << std::endl;
-        return; // Connection not successful, return
+        // Now, we throw an exception here because the connection is not active.
+        throw SendDataException("Socket is not connected. Cannot send data.");
     }
 
     asio::error_code error;
@@ -62,9 +62,8 @@ void CameraDataSender::sendData(const char* data, uint32_t dataLength) {
     while (total_bytes_sent < dataLength) {
         size_t bytes_sent = m_socket.send(asio::buffer(data + total_bytes_sent, dataLength - total_bytes_sent), 0, error);
         if (error) {
-            std::cerr << "Send error: " << error.message() << std::endl;
-            // Depending on the error, you might want to try reconnecting or handle it differently
-            return;
+            // Throw an exception on send error
+            throw SendDataException("Send error: " + error.message());
         }
         total_bytes_sent += bytes_sent;
     }

@@ -1,3 +1,5 @@
+class SendDataException;
+
 //Console application for testing FFmpeg camera capture and video streaming functionality
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -7,7 +9,12 @@ extern "C" {
 #include <libavutil/imgutils.h>
 }
 
-#include "CameraCapture.h"
+// ZED includes
+#include <sl/Camera.hpp>
+
+// OpenCV include (for display)
+#include <opencv2/opencv.hpp>
+
 #include <stdio.h>
 #include <inttypes.h>  // For format specifiers like PRIu64
 #include <vector>
@@ -23,7 +30,57 @@ extern "C" {
 #include <iostream>
 #include <thread>
 #include <chrono>
+
+#ifdef _WIN32
 #include <conio.h> // Add this line to use _kbhit() and _getch()
+#include <windows.h> // For OutputDebugStringA
+#else
+#include <termios.h> // For _kbhit and _getch on Linux
+#include <unistd.h>
+#include <fcntl.h>
+
+// Mock OutputDebugStringA for Linux
+#define OutputDebugStringA(x) std::cerr << x
+// Mock _kbhit and _getch for Linux
+int _kbhit() {
+    struct termios oldt, newt;
+    int ch;
+    int oldf;
+
+    tcgetattr(STDIN_FILENO, &oldt);
+    newt = oldt;
+    newt.c_lflag &= ~(ICANON | ECHO);
+    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+    oldf = fcntl(STDIN_FILENO, F_GETFL, 0);
+    fcntl(STDIN_FILENO, F_SETFL, oldf | O_NONBLOCK);
+
+    ch = getchar();
+
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+    fcntl(STDIN_FILENO, F_SETFL, oldf);
+
+    if (ch != EOF) {
+        ungetc(ch, stdin);
+        return 1;
+    }
+
+    return 0;
+}
+
+int _getch() {
+    int ch;
+    struct termios oldt, newt;
+    tcgetattr(STDIN_FILENO, &oldt);
+    newt = oldt;
+    newt.c_lflag &= ~(ICANON | ECHO);
+    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+    ch = getchar();
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+    return ch;
+}
+
+#endif
+
 #include "CameraDataReceiver.h"
 #include "CameraDataSender.h"
 #include "NetworkVideoSource.h"
@@ -31,27 +88,56 @@ extern "C" {
 #include <sstream>
 #include <iomanip>
 
-// Add file path constant
+// Function to convert RGBA (from sl::Mat) to YUV (I420/YUV420p)
+void convertRBGAToYUV(const sl::Mat & rgba_frame, std::vector<uint8_t>&y_plane,
+    std::vector<uint8_t>&u_plane, std::vector<uint8_t>&v_plane) {
+    int width = rgba_frame.getWidth();
+    int height = rgba_frame.getHeight();
+    size_t rgba_step = rgba_frame.getStepBytes(); // Bytes per row for RGBA
+
+    // Resize Y, U, V planes
+    y_plane.resize(width * height);
+    u_plane.resize((width / 2) * (height / 2));
+    v_plane.resize((width / 2) * (height / 2));
+
+    const unsigned char* rgba_data = rgba_frame.getPtr<unsigned char>(sl::MEM::CPU);
+
+    // Populate Y plane
+    for (int i = 0; i < height; ++i) {
+        for (int j = 0; j < width; ++j) {
+            size_t rgba_idx = i * rgba_step + j * 4; // 4 bytes per pixel (R, G, B, A)
+            unsigned char B = rgba_data[rgba_idx];
+            unsigned char G = rgba_data[rgba_idx + 1];
+            unsigned char R = rgba_data[rgba_idx + 2];
+
+            // Y = 0.299R + 0.587G + 0.114B
+            y_plane[i * width + j] = static_cast<uint8_t>(0.299 * R + 0.587 * G + 0.114 * B);
+        }
+    }
+
+    // Populate U and V planes (4:2:0 subsampling)
+    // For simplicity, sample U and V from the top-left pixel of each 2x2 block.
+    for (int i = 0; i < height; i += 2) {
+        for (int j = 0; j < width; j += 2) {
+            size_t rgba_idx = i * rgba_step + j * 4;
+            unsigned char B = rgba_data[rgba_idx];
+            unsigned char G = rgba_data[rgba_idx + 1];
+            unsigned char R = rgba_data[rgba_idx + 2];
+
+            // U = -0.147R - 0.289G + 0.436B + 128
+            u_plane[(i / 2) * (width / 2) + (j / 2)] = static_cast<uint8_t>(-0.147 * R - 0.289 * G + 0.436 * B + 128);
+
+            // V = 0.615R - 0.515G - 0.100B + 128
+            v_plane[(i / 2) * (width / 2) + (j / 2)] = static_cast<uint8_t>(0.615 * R - 0.515 * G - 0.100 * B + 128);
+        }
+    }
+}
+
 
 // main function
 int RunCameraCaptureTest(char* captureDevice, int resolution_width, int resolution_height, int frameRate) {
     // Global initialization (only call once)
     avdevice_register_all();
-    // Set FFmpeg log level to debug mode
-    //av_log_set_level(AV_LOG_DEBUG);
-
-    // Parameter configuration
-    //const char* captureDevice = "video=HP HD Camera";
-    //int resolution_width = 1280; // Parameterized
-    //int resolution_height = 720; // Parameterized
-
-    // Generate resolution string using width and height
-    std::string resolution = std::to_string(resolution_width) + "x" + std::to_string(resolution_height);
-
-    const char* codec = "mjpeg";
-    //const int frameRate = 30; // Use integer constant // Parameterized
-    std::string framerate_str = std::to_string(frameRate);
-    int frame_count = frameRate;
 
     // Define decoder callback function
     auto decode_callback = [](const uint8_t* data, size_t size, int width, int height) {
@@ -69,47 +155,105 @@ int RunCameraCaptureTest(char* captureDevice, int resolution_width, int resoluti
     // Create encoder instance
     H264Encoder h264_encoder(resolution_width, resolution_height, encoder_callback, frameRate);
 
-    // Define frame processing callback function
-    auto frame_callback = [&h264_encoder](auto y, auto u, auto v,
-        auto y_sz, auto u_sz, auto v_sz,
-        int w, int h, int idx) {
-            printf("Processing frame %d\n", idx);
-            h264_encoder.encodeFrame(y, u, v, y_sz, u_sz, v_sz);
-    };
+    // ZED Camera setup
+    sl::Camera zed;
+    sl::InitParameters init_parameters;
 
-    // Create and execute camera capture object
-    CameraCapture capture(
-        captureDevice,
-        resolution.c_str(),
-        framerate_str.c_str(),
-        codec,
-        frame_count
-    );
+    // Set desired ZED resolution. Choose the closest or compatible one.
+    if (resolution_width == 1920 && resolution_height == 1080) {
+        init_parameters.camera_resolution = sl::RESOLUTION::HD1080;
+    }
+    else if (resolution_width == 1280 && resolution_height == 720) {
+        init_parameters.camera_resolution = sl::RESOLUTION::HD720;
+    }
+    else if (resolution_width == 2208 && resolution_height == 1242) {
+        init_parameters.camera_resolution = sl::RESOLUTION::HD2K;
+    }
+    else if (resolution_width == 672 && resolution_height == 376) {
+        init_parameters.camera_resolution = sl::RESOLUTION::VGA;
+    }
+    else {
+        std::cerr << "Warning: Requested resolution " << resolution_width << "x" << resolution_height
+            << " not directly supported by ZED SDK. Using HD720 as default." << std::endl;
+        init_parameters.camera_resolution = sl::RESOLUTION::HD720;
+    }
+    init_parameters.camera_fps = frameRate;
+    init_parameters.depth_mode = sl::DEPTH_MODE::NONE; // We only need RGB here
 
-    // Run capture and pass callback function
-    int ret = capture.run(frame_callback);
+    // Open the camera
+    sl::ERROR_CODE err = zed.open(init_parameters);
+    if (err != sl::ERROR_CODE::SUCCESS) {
+        std::cerr << "Error " << err << " opening ZED Camera" << std::endl;
+        return -1;
+    }
 
-    printf("Capture completed with exit code: %d\n", ret);
+    // Verify ZED camera resolution against requested encoder resolution
+    if (zed.getCameraInformation().camera_configuration.resolution.width != resolution_width ||
+        zed.getCameraInformation().camera_configuration.resolution.height != resolution_height) {
+        std::cerr << "Warning: ZED camera resolution ("
+            << zed.getCameraInformation().camera_configuration.resolution.width << "x"
+            << zed.getCameraInformation().camera_configuration.resolution.height
+            << ") does not exactly match requested encoder resolution ("
+            << resolution_width << "x" << resolution_height << "). "
+            << "Image might be scaled or distorted by encoder if it doesn't handle mismatches." << std::endl;
+    }
 
-    return ret;
+    bool continue_capture = true;
+    int current_frame_idx = 0;
+
+    std::thread input_thread([&continue_capture]() {
+        std::cout << "Press Q to stop capturing..." << std::endl;
+        while (true) {
+            if (_kbhit()) {
+                char ch = _getch();
+                if (ch == 'q' || ch == 'Q') {
+                    continue_capture = false;
+                    break;
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        });
+
+    sl::Mat zed_image; // ZED SDK's image format
+
+    while (continue_capture) {
+        if (zed.grab() == sl::ERROR_CODE::SUCCESS) {
+            // Retrieve image in RGBA format
+            zed.retrieveImage(zed_image, sl::VIEW::LEFT, sl::MEM::CPU);
+
+            // Convert sl::Mat (RGBA) to YUV (I420/YUV420p)
+            std::vector<uint8_t> y_plane, u_plane, v_plane;
+            convertRBGAToYUV(zed_image, y_plane, u_plane, v_plane);
+
+            // Pass YUV planes to the encoder
+            printf("Processing frame %d\n", current_frame_idx++);
+            h264_encoder.encodeFrame(y_plane.data(), u_plane.data(), v_plane.data(),
+                y_plane.size(), u_plane.size(), v_plane.size());
+
+            // Convert sl::Mat to cv::Mat (share buffer)
+            cv::Mat cvImage = cv::Mat((int)zed_image.getHeight(), (int)zed_image.getWidth(), CV_8UC4, zed_image.getPtr<sl::uchar1>(sl::MEM::CPU));
+
+
+            //Display the image
+            cv::imwrite("frame.jpg", cvImage);
+        }
+        else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1)); // Avoid busy-waiting
+        }
+    }
+
+    zed.close(); // Close the ZED camera
+    input_thread.join();
+
+    printf("Capture completed.\n");
+
+    return 0;
 }
 
 int RunSimpleCameraCaptureTest(char* captureDevice, int resolution_width, int resolution_height, int frameRate) {
     // Global initialization (only call once)
     avdevice_register_all();
-
-    // Parameter configuration
-    //const char* captureDevice = "video=Orbbec Gemini 2 RGB Camera"; // Parameterized
-    //int resolution_width = 1280; // Parameterized
-    //int resolution_height = 720; // Parameterized
-
-    // Generate resolution string using width and height
-    std::string resolution = std::to_string(resolution_width) + "x" + std::to_string(resolution_height);
-
-    const char* codec = "libx264"; // mjpeg
-    //const int frameRate = 30; // 60 // Parameterized
-    std::string framerate_str = std::to_string(frameRate);
-    int frame_count = frameRate;
 
     // Create output file
     FILE* output_file = fopen("captured_frames.yuv", "wb");
@@ -118,36 +262,96 @@ int RunSimpleCameraCaptureTest(char* captureDevice, int resolution_width, int re
         return -1;
     }
 
-    // Define frame processing callback function
-    auto frame_callback = [output_file](auto y, auto u, auto v,
-        auto y_sz, auto u_sz, auto v_sz,
-        int w, int h, int idx) {
-            // Write current frame
-            fwrite(y, 1, y_sz, output_file);
-            fwrite(u, 1, u_sz, output_file);
-            fwrite(v, 1, v_sz, output_file);
-            printf("Wrote frame %d to captured_frames.yuv\n", idx + 1);
-    };
+    // ZED Camera setup
+    sl::Camera zed;
+    sl::InitParameters init_parameters;
+    // Set desired ZED resolution. Choose the closest or compatible one.
+    if (resolution_width == 1920 && resolution_height == 1080) {
+        init_parameters.camera_resolution = sl::RESOLUTION::HD1080;
+    }
+    else if (resolution_width == 1280 && resolution_height == 720) {
+        init_parameters.camera_resolution = sl::RESOLUTION::HD720;
+    }
+    else if (resolution_width == 2208 && resolution_height == 1242) {
+        init_parameters.camera_resolution = sl::RESOLUTION::HD2K;
+    }
+    else if (resolution_width == 672 && resolution_height == 376) {
+        init_parameters.camera_resolution = sl::RESOLUTION::VGA;
+    }
+    else {
+        std::cerr << "Warning: Requested resolution " << resolution_width << "x" << resolution_height
+            << " not directly supported by ZED SDK. Using HD720 as default." << std::endl;
+        init_parameters.camera_resolution = sl::RESOLUTION::HD720;
+    }
+    init_parameters.camera_fps = frameRate;
+    init_parameters.depth_mode = sl::DEPTH_MODE::NONE; // We only need RGB here
 
-    // Create and execute camera capture object
-    CameraCapture capture(
-        captureDevice,
-        resolution.c_str(),
-        framerate_str.c_str(),
-        codec,
-        frame_count
-    );
+    // Open the camera
+    sl::ERROR_CODE err = zed.open(init_parameters);
+    if (err != sl::ERROR_CODE::SUCCESS) {
+        std::cerr << "Error " << err << " opening ZED Camera" << std::endl;
+        fclose(output_file);
+        return -1;
+    }
 
-    // Run capture and pass callback function
-    int ret = capture.run(frame_callback);
+    // Verify ZED camera resolution against requested encoder resolution
+    if (zed.getCameraInformation().camera_configuration.resolution.width != resolution_width ||
+        zed.getCameraInformation().camera_configuration.resolution.height != resolution_height) {
+        std::cerr << "Warning: ZED camera resolution ("
+            << zed.getCameraInformation().camera_configuration.resolution.width << "x"
+            << zed.getCameraInformation().camera_configuration.resolution.height
+            << ") does not exactly match requested encoder resolution ("
+            << resolution_width << "x" << resolution_height << "). "
+            << "Frames might be scaled or distorted upon saving if encoder doesn't handle mismatches." << std::endl;
+    }
 
-    // Close file
-    fclose(output_file);
+
+    bool continue_capture = true;
+    int current_frame_idx = 0;
+
+    std::thread input_thread([&continue_capture]() {
+        std::cout << "Press Q to stop capturing..." << std::endl;
+        while (true) {
+            if (_kbhit()) {
+                char ch = _getch();
+                if (ch == 'q' || ch == 'Q') {
+                    continue_capture = false;
+                    break;
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        });
+
+    sl::Mat zed_image; // ZED SDK's image format
+
+    while (continue_capture) {
+        if (zed.grab() == sl::ERROR_CODE::SUCCESS) {
+            // Retrieve image in RGBA format
+            zed.retrieveImage(zed_image, sl::VIEW::SIDE_BY_SIDE, sl::MEM::GPU);
+
+            // Convert sl::Mat (RGBA) to YUV (I420/YUV420p)
+            std::vector<uint8_t> y_plane, u_plane, v_plane;
+            convertRBGAToYUV(zed_image, y_plane, u_plane, v_plane);
+
+            // Write current frame Y, U, V planes to file
+            fwrite(y_plane.data(), 1, y_plane.size(), output_file);
+            fwrite(u_plane.data(), 1, u_plane.size(), output_file);
+            fwrite(v_plane.data(), 1, v_plane.size(), output_file);
+            printf("Wrote frame %d to captured_frames.yuv\n", ++current_frame_idx);
+        }
+        else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1)); // Avoid busy-waiting
+        }
+    }
+
+    zed.close(); // Close the ZED camera
+    input_thread.join();
+    fclose(output_file); // Close file
     printf("All frames have been written to captured_frames.yuv\n");
+    printf("Capture completed.\n");
 
-    printf("Capture completed with exit code: %d\n", ret);
-
-    return ret;
+    return 0;
 }
 
 
@@ -186,52 +390,101 @@ int runH264TCPTransferTest(int argc, char* argv[], const std::string & ip, int p
         auto run = [&](CameraDataSender& sender) {
             // Global initialization (only call once)
             avdevice_register_all();
-            // Set FFmpeg log level to debug mode
-            //av_log_set_level(AV_LOG_DEBUG);
-
-            // Parameter configuration
-            //const char* captureDevice = "video=Orbbec Gemini 2 RGB Camera"; // Parameterized
-            //int resolution_width = 1280; // Parameterized
-            //int resolution_height = 720; // Parameterized
-
-            // Use resolution width and height to generate resolution string
-            std::string resolution = std::to_string(resolution_width) + "x" + std::to_string(resolution_height);
-
-            const char* codec = "mjpeg";
-            //const int frameRate = 60; // Use integer constant // Parameterized
-            std::string framerate_str = std::to_string(frameRate);
-            int frame_count = frameRate * 5;
-
-            // Define encoder callback function
-            auto encoder_callback = [&sender](const uint8_t* data, size_t size) {
-                OutputDebugStringA((std::string("encode done send size: ") + std::to_string(size)).c_str());
-                sender.sendData(reinterpret_cast<const char*>(data), static_cast<uint32_t>(size));
-            };
 
             // Create encoder instance
-            H264Encoder h264_encoder(resolution_width, resolution_height, encoder_callback, frameRate);
+            H264Encoder h264_encoder(resolution_width, resolution_height, [&sender](const uint8_t* data, size_t size) {
+                OutputDebugStringA((std::string("encode done send size: ") + std::to_string(size)).c_str());
+                // Implement 4-byte big-endian length header, matching Java's ByteBuffer.putInt(length)
+                std::vector<uint8_t> packet(4 + size);
+                packet[0] = (size >> 24) & 0xFF;
+                packet[1] = (size >> 16) & 0xFF;
+                packet[2] = (size >> 8) & 0xFF;
+                packet[3] = (size) & 0xFF;
+                std::copy(data, data + size, packet.begin() + 4);
+                sender.sendData(reinterpret_cast<const char*>(packet.data()), static_cast<uint32_t>(packet.size()));
+                }, frameRate);
 
-            // Define frame processing callback function
-            auto frame_callback = [&h264_encoder](auto y, auto u, auto v,
-                auto y_sz, auto u_sz, auto v_sz,
-                int w, int h, int idx) {
-                    h264_encoder.encodeFrame(y, u, v, y_sz, u_sz, v_sz);
-            };
+            // ZED Camera setup
+            sl::Camera zed;
+            sl::InitParameters init_parameters;
+            // Set desired ZED resolution. Choose the closest or compatible one.
+            if (resolution_width == 1920 && resolution_height == 1080) {
+                init_parameters.camera_resolution = sl::RESOLUTION::HD1080;
+            }
+            else if (resolution_width == 1280 && resolution_height == 720) {
+                init_parameters.camera_resolution = sl::RESOLUTION::HD720;
+            }
+            else if (resolution_width == 2208 && resolution_height == 1242) {
+                init_parameters.camera_resolution = sl::RESOLUTION::HD2K;
+            }
+            else if (resolution_width == 672 && resolution_height == 376) {
+                init_parameters.camera_resolution = sl::RESOLUTION::VGA;
+            }
+            else {
+                std::cerr << "Warning: Requested resolution " << resolution_width << "x" << resolution_height
+                    << " not directly supported by ZED SDK. Using HD720 as default." << std::endl;
+                init_parameters.camera_resolution = sl::RESOLUTION::HD720;
+            }
+            init_parameters.camera_fps = frameRate;
+            init_parameters.depth_mode = sl::DEPTH_MODE::NONE; // We only need RGB here
 
-            // Create and execute camera capture object
-            CameraCapture capture(
-                camera_name.c_str(),
-                resolution.c_str(),
-                framerate_str.c_str(),
-                codec,
-                frame_count
-            );
+            // Open the camera
+            sl::ERROR_CODE err = zed.open(init_parameters);
+            if (err != sl::ERROR_CODE::SUCCESS) {
+                std::cerr << "Error " << err << " opening ZED Camera" << std::endl;
+                sender.disconnect();
+                return;
+            }
 
-            // Run capture and pass callback function
-            int ret = capture.run(frame_callback);
+            // Verify ZED camera resolution against requested encoder resolution
+            if (zed.getCameraInformation().camera_configuration.resolution.width != resolution_width ||
+                zed.getCameraInformation().camera_configuration.resolution.height != resolution_height) {
+                std::cerr << "Warning: ZED camera resolution ("
+                    << zed.getCameraInformation().camera_configuration.resolution.width << "x"
+                    << zed.getCameraInformation().camera_configuration.resolution.height
+                    << ") does not exactly match requested encoder resolution ("
+                    << resolution_width << "x" << resolution_height << "). "
+                    << "Image might be scaled or distorted." << std::endl;
+            }
 
-            printf("Capture completed with exit code: %d\n", ret);
+            bool continue_capture = true;
 
+            std::thread input_thread([&continue_capture]() {
+                std::cout << "Press Q to stop capturing..." << std::endl;
+                while (true) {
+                    if (_kbhit()) {
+                        char ch = _getch();
+                        if (ch == 'q' || ch == 'Q') {
+                            continue_capture = false;
+                            break;
+                        }
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+                });
+
+            sl::Mat zed_image; // ZED SDK's image format
+
+            while (continue_capture) {
+                if (zed.grab() == sl::ERROR_CODE::SUCCESS) {
+                    // Retrieve image in RGBA format
+                    zed.retrieveImage(zed_image, sl::VIEW::LEFT, sl::MEM::CPU);
+
+                    // Convert sl::Mat (RGBA) to YUV (I420/YUV420p)
+                    std::vector<uint8_t> y_plane, u_plane, v_plane;
+                    convertRBGAToYUV(zed_image, y_plane, u_plane, v_plane);
+
+                    // Pass YUV planes to the encoder
+                    h264_encoder.encodeFrame(y_plane.data(), u_plane.data(), v_plane.data(),
+                        y_plane.size(), u_plane.size(), v_plane.size());
+                }
+                else {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1)); // Avoid busy-waiting
+                }
+            }
+
+            zed.close(); // Close the ZED camera
+            input_thread.join();
             // Disconnect
             sender.disconnect();
         };
@@ -250,32 +503,27 @@ int runH264TCPTransferTest(int argc, char* argv[], const std::string & ip, int p
     return 0;
 }
 
-int runH264TCPCameraCaptureTest(int argc, char* argv[], const std::string & server_ip, int port, int resolution_width, int resolution_height, int frameRate, const std::string & camera_name) {
+// Global flag to signal application exit
+bool app_should_quit = false;
 
-    //std::string server_ip = argv[2]; // Parameterized
-    //std::string camera_name = (argc > 3) ? argv[3] : "video=Orbbec Gemini 2 RGB Camera"; // Parameterized
+// Function to print error and quit
+void printErrorAndQuit(const std::string& errorMessage) {
+    std::cerr << "Fatal Error: " << errorMessage << std::endl;
+    app_should_quit = true; // Set flag for graceful shutdown if possible
+    std::exit(EXIT_FAILURE); // Force exit
+}
+
+int runH264TCPCameraCaptureTest(int argc, char* argv[], const std::string& server_ip, int port, int resolution_width, int resolution_height, int frameRate, const std::string& camera_name) {
 
     CameraDataSender sender(server_ip.c_str(), port);
     auto run = [&](CameraDataSender& sender) {
         avdevice_register_all();
-
-        //int resolution_width = 1920; // Parameterized
-        //int resolution_height = 1080; // Parameterized
-        std::string resolution = std::to_string(resolution_width) + "x" + std::to_string(resolution_height);
-        const AVCodec* avcodec = avcodec_find_decoder(AV_CODEC_ID_H264);
-        const char* codec = avcodec_get_name(avcodec->id);
-        //const int frameRate = 30; // Parameterized
-        std::string framerate_str = std::to_string(frameRate);
 
         auto encoder_callback = [&sender](const uint8_t* data, size_t size) {
             if (size == 0 || data == nullptr) {
                 OutputDebugStringA("Encoder callback received empty data.\n");
                 return;
             }
-
-            // Implement 4-byte big-endian length header, matching Java's ByteBuffer.putInt(length)
-            // The Java code sends the entire encodedData (NALU) prefixed with its length.
-            // The C++ side should do the same.
 
             std::vector<uint8_t> packet(4 + size);
 
@@ -288,44 +536,132 @@ int runH264TCPCameraCaptureTest(int argc, char* argv[], const std::string & serv
             // Copy NALU data
             std::copy(data, data + size, packet.begin() + 4);
 
-            // Send the length-prefixed packet
-            sender.sendData(reinterpret_cast<const char*>(packet.data()), static_cast<uint32_t>(packet.size()));
+            // --- Catch SendDataException here ---
+            try {
+                // Send the length-prefixed packet
+                sender.sendData(reinterpret_cast<const char*>(packet.data()), static_cast<uint32_t>(packet.size()));
+            }
+            catch (const SendDataException& e) {
+                printErrorAndQuit(e.what()); // Call the function to print error and quit
+            }
+            catch (const std::exception& e) { // Catch any other standard exceptions
+                printErrorAndQuit("An unexpected error occurred during sendData: " + std::string(e.what()));
+            }
         };
 
-        H264Encoder h264_encoder(resolution_width, resolution_height, encoder_callback, frameRate);
+        // In SIDE_BY_SIDE mode, the real width is 2 * resolution_width
+        H264Encoder h264_encoder(resolution_width * 2, resolution_height, encoder_callback, frameRate);
 
-        auto frame_callback = [&h264_encoder](auto y, auto u, auto v, auto y_sz, auto u_sz, auto v_sz, int w, int h, int idx) {
-            h264_encoder.encodeFrame(y, u, v, y_sz, u_sz, v_sz);
-        };
+        // ZED Camera setup
+        sl::Camera zed;
+        sl::InitParameters init_parameters;
+        // Set desired ZED resolution. Choose the closest or compatible one.
+        if (resolution_width == 1920 && resolution_height == 1080) {
+            init_parameters.camera_resolution = sl::RESOLUTION::HD1080;
+        }
+        else if (resolution_width == 1280 && resolution_height == 720) {
+            init_parameters.camera_resolution = sl::RESOLUTION::HD720;
+        }
+        else if (resolution_width == 2208 && resolution_height == 1242) {
+            init_parameters.camera_resolution = sl::RESOLUTION::HD2K;
+        }
+        else if (resolution_width == 672 && resolution_height == 376) {
+            init_parameters.camera_resolution = sl::RESOLUTION::VGA;
+        }
+        else {
+            std::cerr << "Warning: Requested resolution " << resolution_width << "x" << resolution_height
+                << " not directly supported by ZED SDK. Using HD720 as default." << std::endl;
+            init_parameters.camera_resolution = sl::RESOLUTION::HD720;
+        }
+        init_parameters.camera_fps = frameRate;
+        init_parameters.depth_mode = sl::DEPTH_MODE::NONE; // We only need RGB here
 
-        CameraCapture capture(
-            camera_name.c_str(),
-            resolution.c_str(),
-            framerate_str.c_str(),
-            codec,
-            0 // continuous
-        );
+        // Open the camera
+        sl::ERROR_CODE err = zed.open(init_parameters);
+        if (err != sl::ERROR_CODE::SUCCESS) {
+            std::cerr << "Error " << err << " opening ZED Camera" << std::endl;
+            sender.disconnect();
+            return;
+        }
 
-        std::thread input_thread([&capture]() {
+        // Verify ZED camera resolution against requested encoder resolution
+        if (zed.getCameraInformation().camera_configuration.resolution.width != resolution_width ||
+            zed.getCameraInformation().camera_configuration.resolution.height != resolution_height) {
+            std::cerr << "Warning: ZED camera resolution ("
+                << zed.getCameraInformation().camera_configuration.resolution.width << "x"
+                << zed.getCameraInformation().camera_configuration.resolution.height
+                << ") does not match requested encoder resolution ("
+                << resolution_width << "x" << resolution_height << "). "
+                << "Image might be scaled or distorted." << std::endl;
+        }
+
+        bool continue_capture = true;
+
+        std::thread input_thread([&continue_capture]() {
             std::cout << "Press Q to stop capturing..." << std::endl;
             while (true) {
+#ifdef _WIN32
                 if (_kbhit()) {
                     char ch = _getch();
                     if (ch == 'q' || ch == 'Q') {
-                        capture.stopCapture();
+                        continue_capture = false;
                         break;
                     }
                 }
+#else
+                // Simple non-blocking input for Linux/macOS
+                char ch;
+                if (std::cin.peek() != EOF && std::cin >> ch) {
+                    if (ch == 'q' || ch == 'Q') {
+                        continue_capture = false;
+                        break;
+                    }
+                }
+#endif
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                if (app_should_quit) { // Check global flag to exit input thread early
+                    break;
+                }
             }
             });
 
-        int ret = capture.run(frame_callback);
+        sl::Mat zed_image; // ZED SDK's image format
+
+        // Main capture loop. It will also check the global app_should_quit flag.
+        while (continue_capture && !app_should_quit) {
+            if (zed.grab() == sl::ERROR_CODE::SUCCESS) {
+                // Retrieve image in RGBA format (compatible with OpenCV)
+                zed.retrieveImage(zed_image, sl::VIEW::SIDE_BY_SIDE, sl::MEM::CPU);
+
+                // Convert sl::Mat (RGBA) to YUV (I420/YUV420p)
+                std::vector<uint8_t> y_plane, u_plane, v_plane;
+                convertRBGAToYUV(zed_image, y_plane, u_plane, v_plane);
+
+                // Pass YUV planes to the encoder
+                // If an exception occurs in encoder_callback (due to sendData), app_should_quit will be set.
+                h264_encoder.encodeFrame(y_plane.data(), u_plane.data(), v_plane.data(),
+                    y_plane.size(), u_plane.size(), v_plane.size());
+            }
+            else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1)); // Avoid busy-waiting
+            }
+        }
+
+        zed.close(); // Close the ZED camera
         input_thread.join();
         sender.disconnect();
     };
 
-    sender.startConnect(run);
+    // The startConnect callback now also uses printErrorAndQuit
+    sender.startConnect([&](CameraDataSender& s) {
+        try {
+            run(s);
+        }
+        catch (const std::exception& e) {
+            // This catches any remaining unhandled exceptions from the 'run' lambda
+            printErrorAndQuit("Unhandled exception in run lambda: " + std::string(e.what()));
+        }
+        });
     sender.runIOContext();
     return 0;
 }
@@ -474,13 +810,7 @@ void printUsage(const char* programName) {
     std::cout << "                       c: Client side" << std::endl;
     std::cout << "                       Parameters (for client): --ip <ip_address> --port <port> --camera <camera_name> --width <width> --height <height> --fps <fps>" << std::endl;
     std::cout << "                       Parameters (for server): --ip <ip_address> --port <port>" << std::endl;
-    /*std::cout << "  --tcp-camera [s|c]   Run complete camera capture, H.264 encoding, TCP transfer test" << std::endl;
-    std::cout << "                       s: Server side" << std::endl;
-    std::cout << "                       c: Client side" << std::endl;
-    std::cout << "                       Parameters (for client): --ip <ip_address> --port <port> --camera <camera_name> --width <width> --height <height> --fps <fps>" << std::endl;
-    std::cout << "                       Parameters (for server): --ip <ip_address> --port <port>" << std::endl;*/
     std::cout << "  --tcp-camera c       Run complete camera capture, H.264 encoding, TCP transfer test" << std::endl;
-    //std::cout << "                       s: Server side" << std::endl;
     std::cout << "                       c: Client side" << std::endl;
     std::cout << "                       Parameters (for client): --ip <ip_address> --port <port> --camera <camera_name> --width <width> --height <height> --fps <fps>" << std::endl;
     std::cout << "                       Note: The server is located in the VideoPlayer." << std::endl;
@@ -502,7 +832,7 @@ int main(int argc, char* argv[]) {
     std::string option = argv[1];
 
     // Default values for parameters
-    std::string camera_name = "video=Integrated Webcam";
+    std::string camera_name = "video=Integrated Webcam"; // This will not be used by ZED camera directly
     int resolution_width = 1280;
     int resolution_height = 720;
     int frameRate = 30;
@@ -533,9 +863,11 @@ int main(int argc, char* argv[]) {
     }
 
     if (option == "--camera-test") {
+        // For ZED, camera_name is not directly used as a device string, but resolution and framerate are.
         return RunCameraCaptureTest(const_cast<char*>(camera_name.c_str()), resolution_width, resolution_height, frameRate);
     }
     else if (option == "--simple-capture") {
+        // For ZED, camera_name is not directly used as a device string, but resolution and framerate are.
         return RunSimpleCameraCaptureTest(const_cast<char*>(camera_name.c_str()), resolution_width, resolution_height, frameRate);
     }
     else if (option == "--tcp-transfer") {
@@ -549,7 +881,6 @@ int main(int argc, char* argv[]) {
     }
     else if (option == "--tcp-camera") {
         if (argc < 3) {
-            //std::cout << "Error: --tcp-camera requires [s|c] parameter" << std::endl;
             std::cout << "Error: --tcp-camera requires c parameter" << std::endl;
             printUsage(argv[0]);
             return 1;
