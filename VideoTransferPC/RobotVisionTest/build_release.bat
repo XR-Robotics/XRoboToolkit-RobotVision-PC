@@ -16,7 +16,7 @@ if not exist "build_release" (
 cd build_release
 
 REM Set Visual Studio path
-set VS_PATH=D:\MyProgram\Microsoft Visual Studio\2019\Community\Common7\IDE\devenv.exe
+set VS_PATH=C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\Common7\IDE\devenv.exe
 
 REM Set FFmpeg and ASIO paths
 set FFMPEG_ROOT=..\..\..\..\ffmpeg-7.1-full_build-shared

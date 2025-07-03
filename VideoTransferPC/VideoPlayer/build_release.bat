@@ -16,10 +16,10 @@ if not exist "build_release" (
 cd build_release
 
 REM Set Visual Studio path
-set VS_PATH=D:\MyProgram\Microsoft Visual Studio\2019\Community\Common7\IDE\devenv.exe
+set VS_PATH=C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\Common7\IDE\devenv.exe
 
 REM Set Qt directory
-set QT_DIR=D:\MyProgram\Qt6\6.6.2\msvc2019_64
+set QT_DIR=C:\Qt\6.6.3\msvc2019_64
 
 REM Verify Qt directory exists
 if not exist "!QT_DIR!\bin\qmake.exe" (
