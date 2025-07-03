@@ -46,7 +46,7 @@ make -j 8
 sudo make install
 ```
 
-- build RobotVisionConsole
+- Build
 
 ```
 make -f Makefile.orin
