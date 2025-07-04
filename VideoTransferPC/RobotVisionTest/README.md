@@ -54,5 +54,5 @@ make -f Makefile.orin
 
 - Test
 ```
-RobotVisionConsole 
+./RobotVisionConsole --tcp-camera c --ip <ip address> --port <port> --fps <fps> 
 ```
