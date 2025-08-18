@@ -95,12 +95,21 @@ RobotVisionTest project for testing related functional classes.
      2. Server: TCP reception -> H.264 decoding -> Real-time display
      3. Supports continuous capture mode
    - Usage example:
+     1. PC (ZED) -> PC
      ```bash
      # Server side
-     appVideoPlayer.exe
+     appVideoPlayer.exe --ip {LOCAL_IP} --port 12345
      # Client side
      RobotVisionConsole.exe --tcp-camera c
      ```
+     2. PC (ZED) - VR
+     ```
+     # Headset side
+     Open XRoboToolkit Unity App, Select ZEDMINI, Click Listen
+     # PC side
+     RobotVisionConsole.exe --tcp-camera -c --ip {HEADSET_IP} --port 12345 --width 1280 --height 720 --fps 60
+     ```
+
 
 5. Latency Analysis Test
    - Function: `analyzeDelay(int argc, char* argv[])`
@@ -196,3 +205,13 @@ The project provides an automatic build script `RobotVisionTest\build_release.ba
 4. Compile project to generate executable
 
 After building, the executable will be located at `RobotVisionTest\build_release\Release\RobotVisionConsole.exe` 
+
+## Notes
+
+1. ZED sdk is required to compile the VideoTransferPC program.
+
+2. For the windows version
+
+- It requires **Visual Studio 2019**.
+
+- The VideoPlayer project depends on **Qt 6.6.3**, see the `build_release.bat` file for more details.
