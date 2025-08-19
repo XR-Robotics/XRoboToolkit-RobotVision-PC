@@ -215,3 +215,16 @@ After building, the executable will be located at `RobotVisionTest\build_release
 - It requires **Visual Studio 2019**.
 
 - The VideoPlayer project depends on **Qt 6.6.3**, see the `build_release.bat` file for more details.
+
+## Citation
+
+If you find this project useful, please consider citing it as follows.
+
+```
+@article{zhao2025xrobotoolkit,
+      title={XRoboToolkit: A Cross-Platform Framework for Robot Teleoperation}, 
+      author={Zhigen Zhao and Liuchuan Yu and Ke Jing and Ning Yang}, 
+      journal={arXiv preprint arXiv:2508.00097},
+      year={2025}
+}
+```
