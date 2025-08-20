@@ -513,7 +513,7 @@ void printErrorAndQuit(const std::string& errorMessage) {
     std::exit(EXIT_FAILURE); // Force exit
 }
 
-int runH264TCPCameraCaptureTest(int argc, char* argv[], const std::string& server_ip, int port, int resolution_width, int resolution_height, int frameRate, const std::string& camera_name) {
+int runH264TCPCameraCaptureTest(int argc, char* argv[], const std::string& server_ip, int port, int resolution_width, int resolution_height, int frameRate, const std::string& camera_name, int64_t bitrate) {
 
     CameraDataSender sender(server_ip.c_str(), port);
     auto run = [&](CameraDataSender& sender) {
@@ -550,7 +550,7 @@ int runH264TCPCameraCaptureTest(int argc, char* argv[], const std::string& serve
         };
 
         // In SIDE_BY_SIDE mode, the real width is 2 * resolution_width
-        H264Encoder h264_encoder(resolution_width * 2, resolution_height, encoder_callback, frameRate);
+        H264Encoder h264_encoder(resolution_width * 2, resolution_height, encoder_callback, frameRate, bitrate);
 
         // ZED Camera setup
         sl::Camera zed;
@@ -812,7 +812,7 @@ void printUsage(const char* programName) {
     std::cout << "                       Parameters (for server): --ip <ip_address> --port <port>" << std::endl;
     std::cout << "  --tcp-camera c       Run complete camera capture, H.264 encoding, TCP transfer test" << std::endl;
     std::cout << "                       c: Client side" << std::endl;
-    std::cout << "                       Parameters (for client): --ip <ip_address> --port <port> --camera <camera_name> --width <width> --height <height> --fps <fps>" << std::endl;
+    std::cout << "                       Parameters (for client): --ip <ip_address> --port <port> --camera <camera_name> --width <width> --height <height> --fps <fps> --bitrate <bitrate>" << std::endl;
     std::cout << "                       Note: The server is located in the VideoPlayer." << std::endl;
     std::cout << "  --analyze-delay      Analyze delays in video processing stages" << std::endl;
     std::cout << "Default camera: video=Integrated Webcam" << std::endl;
@@ -821,6 +821,7 @@ void printUsage(const char* programName) {
     std::cout << "Default Width: 1280" << std::endl;
     std::cout << "Default Height: 720" << std::endl;
     std::cout << "Default FPS: 30" << std::endl;
+    std::cout << "Default Bitrate: 4000000 bps (4 Mbps)" << std::endl;
 }
 
 int main(int argc, char* argv[]) {
@@ -838,6 +839,7 @@ int main(int argc, char* argv[]) {
     int frameRate = 30;
     std::string ip = "127.0.0.1";
     int port = 12345;
+    int64_t bitrate = 4000000; // Default bitrate 4 Mbps
 
     // Parse command-line arguments for common parameters
     for (int i = 2; i < argc; ++i) {
@@ -859,6 +861,9 @@ int main(int argc, char* argv[]) {
         }
         else if (arg == "--port" && i + 1 < argc) {
             port = std::stoi(argv[++i]);
+        }
+        else if (arg == "--bitrate" && i + 1 < argc) {
+            bitrate = std::stoll(argv[++i]);
         }
     }
 
@@ -886,7 +891,7 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         // Pass the mode argument (argv[2]) to runH264TCPCameraCaptureTest
-        return runH264TCPCameraCaptureTest(2, argv + 1, ip, port, resolution_width, resolution_height, frameRate, camera_name);
+        return runH264TCPCameraCaptureTest(2, argv + 1, ip, port, resolution_width, resolution_height, frameRate, camera_name, bitrate);
     }
     else if (option == "--analyze-delay") {
         return analyzeDelay(argc - 1, argv + 1);

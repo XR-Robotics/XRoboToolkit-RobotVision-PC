@@ -21,7 +21,7 @@ private:
     int64_t m_ptsCounter;
 
 public:
-    H264Encoder(int width, int height, AVpacketWriteCallback writeCallback, int fps);
+    H264Encoder(int width, int height, AVpacketWriteCallback writeCallback, int fps, int64_t bitrate = 4000000);
 
     void encodeFrame(const uint8_t* y, const uint8_t* u, const uint8_t* v,
                      size_t y_size, size_t u_size, size_t v_size);

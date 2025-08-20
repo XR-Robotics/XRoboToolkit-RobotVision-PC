@@ -107,7 +107,7 @@ RobotVisionTest project for testing related functional classes.
      # Headset side
      Open XRoboToolkit Unity App, Select ZEDMINI, Click Listen
      # PC side
-     RobotVisionConsole.exe --tcp-camera -c --ip {HEADSET_IP} --port 12345 --width 1280 --height 720 --fps 60
+     RobotVisionConsole.exe --tcp-camera -c --ip {HEADSET_IP} --port 12345 --width 1280 --height 720 --fps 60 --bitrate 4000000
      ```
 
 

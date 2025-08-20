@@ -15,7 +15,7 @@ extern "C" {
 #include <inttypes.h>
 #include "FFmpegUtils.h"
 
-H264Encoder::H264Encoder(int width, int height, AVpacketWriteCallback writeCallback, int fps)
+H264Encoder::H264Encoder(int width, int height, AVpacketWriteCallback writeCallback, int fps, int64_t bitrate)
     : m_encCtx(nullptr), m_frame(nullptr), m_pkt(nullptr), m_writeCallback(writeCallback),
       m_ptsCounter(0)
 {
@@ -69,19 +69,8 @@ H264Encoder::H264Encoder(int width, int height, AVpacketWriteCallback writeCallb
     m_encCtx->time_base = AVRational{1, fps};
     m_encCtx->framerate = AVRational{fps, 1};
 
-    // Calculate bitrate dynamically
-    static const int BASE_CONFIG[] = {1280, 720, 30, 4000000}; // Base parameters
-    {
-        auto CalculateBitrate = [](int w, int h, int fps) {
-            int pixel_ratio = (w * h * fps)
-                            / (BASE_CONFIG[0] * BASE_CONFIG[1] * BASE_CONFIG[2]);
-            return std::clamp(BASE_CONFIG[3] * pixel_ratio,
-                            BASE_CONFIG[3]/4,  // Minimum is 1/4 of baseline
-                            BASE_CONFIG[3]*5); // Maximum is 5x baseline
-        };
-
-        m_encCtx->bit_rate = CalculateBitrate(width, height, fps);
-    }
+    // Use provided bitrate
+    m_encCtx->bit_rate = bitrate;
 
     m_encCtx->gop_size = fps * 2; // 2 seconds per GOP
     m_encCtx->max_b_frames = 0;   // Disable B-frames
